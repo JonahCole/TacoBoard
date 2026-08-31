@@ -230,10 +230,10 @@
 
   function createPostElement(post, index) {
     const el = document.createElement('article');
-    el.className = 'note-card' + (current.isAdmin ? ' admin-draggable' : '');
+    el.className = 'note-card' + ((current.isAdmin || current.board?.status === 'open') ? ' admin-draggable' : '');
     el.dataset.id = post.id; el.dataset.kind = 'post';
     el.style.background = post.color || COLORS[0]; el.style.left = `${Number(post.x) || 0}%`; el.style.top = `${Number(post.y) || 0}px`; el.style.transform = `rotate(${Number(post.rotation) || 0}deg)`; el.style.zIndex = String(10 + index);
-    const grip = document.createElement('span'); grip.className = 'card-grip'; grip.textContent = current.isAdmin ? '•••' : '🌮'; el.appendChild(grip);
+    const grip = document.createElement('span'); grip.className = 'card-grip'; grip.textContent = (current.isAdmin || current.board?.status === 'open') ? '•••' : '🌮'; el.appendChild(grip);
     if (post.media) {
       const media = document.createElement('div'); media.className = 'media';
       const img = document.createElement('img'); img.alt = ''; img.loading = 'eager';
@@ -255,7 +255,7 @@
 
   function createStickerElement(sticker) {
     const el = document.createElement('div');
-    el.className = 'board-sticker' + (current.isAdmin ? ' admin-draggable' : '');
+    el.className = 'board-sticker' + ((current.isAdmin || current.board?.status === 'open') ? ' admin-draggable' : '');
     el.dataset.id = sticker.id; el.dataset.kind = 'sticker'; el.style.left = `${Number(sticker.x) || 0}%`; el.style.top = `${Number(sticker.y) || 0}px`; el.style.transform = `rotate(${Number(sticker.rotation) || 0}deg) scale(${Number(sticker.size) || 1})`; el.append(document.createTextNode(sticker.emoji));
     if (current.isAdmin) {
       const remove = document.createElement('button'); remove.className = 'remove-sticker no-export-controls'; remove.textContent = '×'; remove.setAttribute('aria-label','Remove sticker');
@@ -368,7 +368,7 @@
   }
 
   function beginDrag(event) {
-    if (!current.isAdmin || (event.button !== undefined && event.button !== 0)) return;
+    if ((!current.isAdmin && current.board?.status !== 'open') || (event.button !== undefined && event.button !== 0)) return;
     if (event.target.closest('button') || event.target.closest('.message')) return;
     const item = event.target.closest('[data-kind]'); if (!item) return;
     const record = item.dataset.kind === 'post' ? current.posts.find(p=>p.id===item.dataset.id) : current.stickers.find(s=>s.id===item.dataset.id); if (!record) return;
@@ -462,7 +462,7 @@
   function localKey(slug){return `tacoboard:v2:${slug}`}
   function localCreateBoard(title,subtitle){const slug=`local-${randomToken(5)}`,admin_token='local-admin',contributor_token='local';const state={board:{id:cryptoId(),slug,title,subtitle,theme:'fiesta',status:'open',created_at:new Date().toISOString()},posts:[],stickers:[{id:cryptoId(),emoji:'🌮',x:72,y:70,rotation:-10,size:1.18},{id:cryptoId(),emoji:'✨',x:83,y:76,rotation:9,size:.82}],contributor_token};localStorage.setItem(localKey(slug),JSON.stringify(state));return{slug,admin_token,contributor_token}}
   function localGetBoard(){const raw=localStorage.getItem(localKey(current.slug));if(!raw)return null;const state=JSON.parse(raw);return{...state,is_admin:current.token==='local-admin',contributor_token:current.token==='local-admin'?state.contributor_token:null}}
-  function localMutate(action,p){const raw=localStorage.getItem(localKey(current.slug));if(!raw)throw new Error('Local board not found');const s=JSON.parse(raw),admin=current.token==='local-admin';if(s.board.status==='served'&&['add_post','add_sticker'].includes(action)&&!admin)throw new Error('This board has been served.');if(['update_post','delete_post','move_post','delete_sticker','move_sticker','update_board','set_status'].includes(action)&&!admin)throw new Error('Admin taco key required.');
+  function localMutate(action,p){const raw=localStorage.getItem(localKey(current.slug));if(!raw)throw new Error('Local board not found');const s=JSON.parse(raw),admin=current.token==='local-admin';if(s.board.status==='served'&&['add_post','add_sticker'].includes(action)&&!admin)throw new Error('This board has been served.');if(['update_post','delete_post','delete_sticker','update_board','set_status'].includes(action)&&!admin)throw new Error('Admin taco key required.');if(['move_post','move_sticker'].includes(action)&&!admin&&s.board.status!=='open')throw new Error('This board has been served.');
     if(action==='add_post')s.posts.push({id:cryptoId(),author:p.author,message:p.message,media:p.media||'',color:p.color,x:p.x,y:p.y,rotation:p.rotation,created_at:new Date().toISOString()});
     if(action==='update_post'){const x=s.posts.find(v=>v.id===p.post_id);if(x)Object.assign(x,{author:p.author,message:p.message,media:p.media||'',color:p.color})}
     if(action==='delete_post')s.posts=s.posts.filter(v=>v.id!==p.post_id);
