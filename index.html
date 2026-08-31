@@ -91,6 +91,9 @@
         <div class="notice served-notice no-export-controls" id="servedNotice" hidden>
           <span>🍽️</span><div><strong>This TacoBoard has been served.</strong> Contributions are closed, but the delicious evidence remains.</div>
         </div>
+        <div class="identity-hint no-export-controls" id="identityHint" hidden>
+          <span>🌮</span><div><strong>Want to leave a taco?</strong> You’ll claim a lightweight Taco identity first so you can come back and edit your own contribution.</div>
+        </div>
 
         <div class="board-wrap">
           <section class="board" id="board" aria-label="TacoBoard message board">
@@ -110,6 +113,16 @@
       </section>
     </main>
   </div>
+
+  <dialog id="identityDialog" class="dialog small-dialog">
+    <form id="identityForm">
+      <div class="dialog-head"><div><div class="eyebrow">CLAIM YOUR TACO</div><h2>Who are you?</h2></div></div>
+      <p class="dialog-message identity-copy">No password. No corporate profile. TacoBoard gives this browser a private identity so you can edit, delete, and move <strong>your own</strong> contributions later.</p>
+      <label>Your name<input id="identityNameInput" type="text" maxlength="60" placeholder="Jonah" autocomplete="name" required /></label>
+      <p class="identity-error" id="identityError" hidden></p>
+      <div class="dialog-actions"><button class="btn btn-ghost" id="identityCancelBtn" type="button">Never mind</button><button class="btn btn-taco" id="claimIdentityBtn" type="submit">Claim my taco 🌮</button></div>
+    </form>
+  </dialog>
 
   <dialog id="postDialog" class="dialog">
     <form method="dialog" id="postForm">
@@ -141,7 +154,7 @@
     </form>
   </dialog>
 
-  <dialog id="stickerDialog" class="dialog small-dialog"><form method="dialog"><div class="dialog-head"><div><div class="eyebrow">TACO DRAWER</div><h2>Pick some nonsense.</h2></div><button class="icon-btn dialog-close" type="button">×</button></div><div class="sticker-grid" id="stickerGrid"></div><p class="hint center">Admin can drag stickers anywhere on the board.</p></form></dialog>
+  <dialog id="stickerDialog" class="dialog small-dialog"><form method="dialog"><div class="dialog-head"><div><div class="eyebrow">TACO DRAWER</div><h2>Pick some nonsense.</h2></div><button class="icon-btn dialog-close" type="button">×</button></div><div class="sticker-grid" id="stickerGrid"></div><p class="hint center">You can drag or remove stickers you add. The board boss can manage everything.</p></form></dialog>
 
   <dialog id="settingsDialog" class="dialog small-dialog">
     <form method="dialog" id="settingsForm">

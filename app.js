@@ -11,7 +11,8 @@
 
   let current = {
     slug: '', token: '', role: 'contributor', isAdmin: false,
-    contributorToken: '', board: null, posts: [], stickers: []
+    contributorToken: '', board: null, posts: [], stickers: [],
+    userId: '', tacoName: '', isAuthenticated: false
   };
   let selectedColor = COLORS[0];
   let editingPostId = null;
@@ -22,6 +23,7 @@
   let realtimeChannel = null;
   let refreshTimer = null;
   let isRefreshing = false;
+  let identityResolver = null;
 
   const $ = (id) => document.getElementById(id);
   const boardEl = $('board');
@@ -30,6 +32,7 @@
   const settingsDialog = $('settingsDialog');
   const stickerDialog = $('stickerDialog');
   const shareDialog = $('shareDialog');
+  const identityDialog = $('identityDialog');
 
   setupUI();
   boot();
@@ -46,6 +49,9 @@
     $('postForm').addEventListener('submit', submitPost);
     $('settingsForm').addEventListener('submit', saveSettings);
     $('toggleServeBtn').addEventListener('click', toggleServed);
+    $('identityForm').addEventListener('submit', claimTacoIdentity);
+    $('identityCancelBtn').addEventListener('click', cancelIdentity);
+    identityDialog.addEventListener('cancel', event => { event.preventDefault(); cancelIdentity(); });
 
     $('exportMenuBtn').addEventListener('click', (event) => {
       event.stopPropagation();
@@ -124,6 +130,7 @@
     current.token = admin || key || '';
     current.isAdmin = Boolean(admin);
     current.role = current.isAdmin ? 'admin' : 'contributor';
+    if (isRemote) await restoreTacoIdentity();
     if (!current.token && !isRemote) current.token = 'local-admin';
     if (!current.token) return showFatal('Missing taco key', 'This TacoBoard link is incomplete. Ask the board owner for the contributor link again.');
     await loadBoard(true);
@@ -146,7 +153,7 @@
 
   function goHome() {
     history.pushState({}, '', location.pathname);
-    current = { slug:'', token:'', role:'contributor', isAdmin:false, contributorToken:'', board:null, posts:[], stickers:[] };
+    current = { slug:'', token:'', role:'contributor', isAdmin:false, contributorToken:'', board:null, posts:[], stickers:[], userId:current.userId||'', tacoName:current.tacoName||'', isAuthenticated:current.isAuthenticated||false };
     showHome();
   }
 
@@ -190,6 +197,7 @@
       current.isAdmin = Boolean(data.is_admin ?? current.isAdmin);
       current.role = current.isAdmin ? 'admin' : 'contributor';
       current.contributorToken = data.contributor_token || current.contributorToken || '';
+      current.isAuthenticated = Boolean(data.is_authenticated || current.userId);
       showBoardView();
       renderBoard();
       updateRoleUI();
@@ -224,16 +232,18 @@
   function updateRoleUI() {
     document.querySelectorAll('.admin-only').forEach(el => el.hidden = !current.isAdmin);
     $('addStickerBtn').hidden = current.board?.status === 'served';
-    $('rolePill').textContent = current.isAdmin ? '🌶️ Board boss' : '🌮 Taco contributor';
-    if (current.board?.status === 'served') $('rolePill').textContent = current.isAdmin ? '🍽️ Served • admin' : '🍽️ Served';
+    $('rolePill').textContent = current.isAdmin ? '🌶️ Board boss' : (current.tacoName ? `🌮 ${current.tacoName}` : '🌮 Taco contributor');
+    $('identityHint').hidden = current.isAdmin || Boolean(current.tacoName) || current.board?.status === 'served';
+    if (current.board?.status === 'served') $('rolePill').textContent = current.isAdmin ? '🍽️ Served • admin' : (current.tacoName ? `🍽️ ${current.tacoName}` : '🍽️ Served');
   }
 
   function createPostElement(post, index) {
     const el = document.createElement('article');
-    el.className = 'note-card' + ((current.isAdmin || current.board?.status === 'open') ? ' admin-draggable' : '');
+    const canManage = current.isAdmin || (Boolean(post.is_owner) && current.board?.status === 'open');
+    el.className = 'note-card' + (canManage ? ' admin-draggable' : '');
     el.dataset.id = post.id; el.dataset.kind = 'post';
     el.style.background = post.color || COLORS[0]; el.style.left = `${Number(post.x) || 0}%`; el.style.top = `${Number(post.y) || 0}px`; el.style.transform = `rotate(${Number(post.rotation) || 0}deg)`; el.style.zIndex = String(10 + index);
-    const grip = document.createElement('span'); grip.className = 'card-grip'; grip.textContent = (current.isAdmin || current.board?.status === 'open') ? '•••' : '🌮'; el.appendChild(grip);
+    const grip = document.createElement('span'); grip.className = 'card-grip'; grip.textContent = canManage ? '•••' : '🌮'; el.appendChild(grip);
     if (post.media) {
       const media = document.createElement('div'); media.className = 'media';
       const img = document.createElement('img'); img.alt = ''; img.loading = 'eager';
@@ -245,7 +255,8 @@
     const author = document.createElement('div'); author.className = 'author';
     const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.textContent = getInitial(post.author);
     const name = document.createElement('span'); name.textContent = post.author; author.append(avatar, name);
-    if (current.isAdmin) {
+    if (post.is_owner && !current.isAdmin) { const yours=document.createElement('span'); yours.className='yours-pill'; yours.textContent='your taco'; author.appendChild(yours); }
+    if (canManage) {
       const actions = document.createElement('span'); actions.className = 'card-actions no-export-controls';
       actions.append(miniButton('✏️','Edit note',e => { e.stopPropagation(); openPostDialog(post.id); }), miniButton('×','Delete note',e => { e.stopPropagation(); deletePost(post.id); }));
       author.appendChild(actions);
@@ -255,9 +266,10 @@
 
   function createStickerElement(sticker) {
     const el = document.createElement('div');
-    el.className = 'board-sticker' + ((current.isAdmin || current.board?.status === 'open') ? ' admin-draggable' : '');
+    const canManage = current.isAdmin || (Boolean(sticker.is_owner) && current.board?.status === 'open');
+    el.className = 'board-sticker' + (canManage ? ' admin-draggable' : '');
     el.dataset.id = sticker.id; el.dataset.kind = 'sticker'; el.style.left = `${Number(sticker.x) || 0}%`; el.style.top = `${Number(sticker.y) || 0}px`; el.style.transform = `rotate(${Number(sticker.rotation) || 0}deg) scale(${Number(sticker.size) || 1})`; el.append(document.createTextNode(sticker.emoji));
-    if (current.isAdmin) {
+    if (canManage) {
       const remove = document.createElement('button'); remove.className = 'remove-sticker no-export-controls'; remove.textContent = '×'; remove.setAttribute('aria-label','Remove sticker');
       remove.addEventListener('click', async e => { e.stopPropagation(); await deleteSticker(sticker.id); }); el.appendChild(remove);
     }
@@ -266,12 +278,68 @@
 
   function miniButton(text, label, fn) { const b=document.createElement('button'); b.type='button'; b.className='card-mini-btn'; b.textContent=text; b.setAttribute('aria-label',label); b.addEventListener('click',fn); return b; }
 
-  function openPostDialog(postId = null) {
+  async function restoreTacoIdentity() {
+    if (!client) return;
+    try {
+      const {data,error}=await client.auth.getSession(); if(error) throw error;
+      const user=data?.session?.user;
+      if (user) {
+        current.userId=user.id;
+        current.isAuthenticated=true;
+        current.tacoName=String(user.user_metadata?.taco_name || localStorage.getItem('tacoboard:taco-name') || '').trim();
+      }
+    } catch(err) { console.warn('Could not restore Taco identity',err); }
+  }
+
+  function ensureTacoIdentity() {
+    if (current.isAdmin || !isRemote) return Promise.resolve(true);
+    if (current.userId && current.tacoName) return Promise.resolve(true);
+    $('identityNameInput').value=current.tacoName || localStorage.getItem('tacoboard:taco-name') || '';
+    $('identityError').hidden=true;
+    identityDialog.showModal();
+    setTimeout(()=>$('identityNameInput').focus(),30);
+    return new Promise(resolve=>{ identityResolver=resolve; });
+  }
+
+  async function claimTacoIdentity(event) {
+    event.preventDefault();
+    const name=$('identityNameInput').value.trim(); if(!name) return;
+    setBusy($('claimIdentityBtn'),true,'Claiming taco…'); $('identityError').hidden=true;
+    try {
+      let user=null;
+      const {data:sessionData,error:sessionError}=await client.auth.getSession(); if(sessionError) throw sessionError;
+      user=sessionData?.session?.user || null;
+      if (!user) {
+        const {data,error}=await client.auth.signInAnonymously({options:{data:{taco_name:name}}}); if(error) throw error;
+        user=data?.user || data?.session?.user || null;
+      }
+      current.userId=user?.id || '';
+      current.isAuthenticated=Boolean(current.userId);
+      current.tacoName=name;
+      localStorage.setItem('tacoboard:taco-name',name);
+      identityDialog.close();
+      const resolve=identityResolver; identityResolver=null;
+      await loadBoard(); updateRoleUI();
+      showToast(`Taco claimed, ${name} 🌮`);
+      resolve?.(true);
+    } catch(err) {
+      console.error(err); $('identityError').textContent=friendlyError(err); $('identityError').hidden=false;
+    } finally { setBusy($('claimIdentityBtn'),false,'Claim my taco 🌮'); }
+  }
+
+  function cancelIdentity() {
+    identityDialog.close(); const resolve=identityResolver; identityResolver=null; resolve?.(false);
+  }
+
+  async function openPostDialog(postId = null) {
     if (current.board?.status === 'served' && !current.isAdmin) return showToast('This board has already been served 🍽️');
+    if (!current.isAdmin && !(await ensureTacoIdentity())) return;
     editingPostId = postId;
     const post = postId ? current.posts.find(p => p.id === postId) : null;
-    if (post && !current.isAdmin) return;
-    $('authorInput').value = post?.author || localStorage.getItem('tacoboard:last-author') || '';
+    if (post && !current.isAdmin && !post.is_owner) return showToast('That taco belongs to somebody else 🌮');
+    $('authorInput').value = post?.author || (current.isAdmin ? (localStorage.getItem('tacoboard:last-author') || '') : current.tacoName);
+    $('authorInput').readOnly = !current.isAdmin;
+    $('authorInput').classList.toggle('identity-locked', !current.isAdmin);
     $('messageInput').value = post?.message || '';
     selectedColor = post?.color || COLORS[Math.floor(Math.random()*COLORS.length)];
     uploadedMediaData = post?.media?.startsWith('data:') ? post.media : '';
@@ -294,7 +362,8 @@
     setBusy($('submitPostBtn'), true, 'Adding salsa…');
     try {
       if (editingPostId) {
-        if (!current.isAdmin) throw new Error('Only the board admin can edit notes.');
+        const owned = current.posts.find(p=>p.id===editingPostId)?.is_owner;
+        if (!current.isAdmin && !owned) throw new Error('You can only edit your own taco notes.');
         await mutate('update_post', { post_id: editingPostId, author, message, media, color: selectedColor });
         showToast('Taco note updated');
       } else {
@@ -310,18 +379,21 @@
   }
 
   async function deletePost(id) {
-    if (!current.isAdmin || !confirm('Delete this taco note?')) return;
+    const post=current.posts.find(p=>p.id===id); if(!post) return;
+    if (!(current.isAdmin || post.is_owner) || !confirm('Delete this taco note?')) return;
     try { await mutate('delete_post',{post_id:id}); await loadBoard(); broadcastRefresh(); showToast('Taco note removed'); } catch(err){ handleError(err,'Could not delete that note'); }
   }
 
   async function addSticker(emoji) {
     if (current.board?.status === 'served') return showToast('This board has already been served 🍽️');
+    if (!current.isAdmin && !(await ensureTacoIdentity())) return;
     const y = 55 + Math.random() * Math.max(180, boardItems.clientHeight - 160);
     try { await mutate('add_sticker',{emoji,x:65+Math.random()*22,y,rotation:randomBetween(-15,15),size:randomBetween(.78,1.2)}); await loadBoard(); broadcastRefresh(); showToast(`${emoji} deployed`); } catch(err){ handleError(err,'Could not add that sticker'); }
   }
 
   async function deleteSticker(id) {
-    if (!current.isAdmin) return;
+    const sticker=current.stickers.find(s=>s.id===id); if(!sticker) return;
+    if (!(current.isAdmin || sticker.is_owner)) return;
     try { await mutate('delete_sticker',{sticker_id:id}); await loadBoard(); broadcastRefresh(); } catch(err){ handleError(err,'Could not remove that sticker'); }
   }
 
@@ -368,10 +440,12 @@
   }
 
   function beginDrag(event) {
-    if ((!current.isAdmin && current.board?.status !== 'open') || (event.button !== undefined && event.button !== 0)) return;
+    if (event.button !== undefined && event.button !== 0) return;
     if (event.target.closest('button') || event.target.closest('.message')) return;
     const item = event.target.closest('[data-kind]'); if (!item) return;
     const record = item.dataset.kind === 'post' ? current.posts.find(p=>p.id===item.dataset.id) : current.stickers.find(s=>s.id===item.dataset.id); if (!record) return;
+    const canMove = current.isAdmin || (Boolean(record.is_owner) && current.board?.status === 'open');
+    if (!canMove) return;
     const boardRect = boardItems.getBoundingClientRect(), itemRect = item.getBoundingClientRect();
     dragState = { id:item.dataset.id, kind:item.dataset.kind, item, boardRect, offsetX:event.clientX-itemRect.left, offsetY:event.clientY-itemRect.top };
     item.classList.add('dragging'); item.setPointerCapture?.(event.pointerId); event.preventDefault();
@@ -461,7 +535,7 @@
 
   function localKey(slug){return `tacoboard:v2:${slug}`}
   function localCreateBoard(title,subtitle){const slug=`local-${randomToken(5)}`,admin_token='local-admin',contributor_token='local';const state={board:{id:cryptoId(),slug,title,subtitle,theme:'fiesta',status:'open',created_at:new Date().toISOString()},posts:[],stickers:[{id:cryptoId(),emoji:'🌮',x:72,y:70,rotation:-10,size:1.18},{id:cryptoId(),emoji:'✨',x:83,y:76,rotation:9,size:.82}],contributor_token};localStorage.setItem(localKey(slug),JSON.stringify(state));return{slug,admin_token,contributor_token}}
-  function localGetBoard(){const raw=localStorage.getItem(localKey(current.slug));if(!raw)return null;const state=JSON.parse(raw);return{...state,is_admin:current.token==='local-admin',contributor_token:current.token==='local-admin'?state.contributor_token:null}}
+  function localGetBoard(){const raw=localStorage.getItem(localKey(current.slug));if(!raw)return null;const state=JSON.parse(raw);return{...state,is_admin:current.token==='local-admin',is_authenticated:true,contributor_token:current.token==='local-admin'?state.contributor_token:null}}
   function localMutate(action,p){const raw=localStorage.getItem(localKey(current.slug));if(!raw)throw new Error('Local board not found');const s=JSON.parse(raw),admin=current.token==='local-admin';if(s.board.status==='served'&&['add_post','add_sticker'].includes(action)&&!admin)throw new Error('This board has been served.');if(['update_post','delete_post','delete_sticker','update_board','set_status'].includes(action)&&!admin)throw new Error('Admin taco key required.');if(['move_post','move_sticker'].includes(action)&&!admin&&s.board.status!=='open')throw new Error('This board has been served.');
     if(action==='add_post')s.posts.push({id:cryptoId(),author:p.author,message:p.message,media:p.media||'',color:p.color,x:p.x,y:p.y,rotation:p.rotation,created_at:new Date().toISOString()});
     if(action==='update_post'){const x=s.posts.find(v=>v.id===p.post_id);if(x)Object.assign(x,{author:p.author,message:p.message,media:p.media||'',color:p.color})}
