@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#fff7e8" />
+  <meta name="description" content="TacoBoard — appreciation, with seasoning." />
   <title>TacoBoard 🌮</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,158 +19,159 @@
           <svg viewBox="0 0 64 64" role="img" aria-label="Happy taco">
             <path d="M8 37c2-15 12-25 24-25s22 10 24 25H8Z" fill="#F4B942" stroke="#3F2E20" stroke-width="3.5" stroke-linejoin="round"/>
             <path d="M12 35c4-7 10-11 20-11s16 4 20 11" fill="none" stroke="#6DA34D" stroke-width="6" stroke-linecap="round"/>
-            <circle cx="23" cy="38" r="2.2" fill="#3F2E20"/>
-            <circle cx="41" cy="38" r="2.2" fill="#3F2E20"/>
+            <circle cx="23" cy="38" r="2.2" fill="#3F2E20"/><circle cx="41" cy="38" r="2.2" fill="#3F2E20"/>
             <path d="M26 44c4 3 8 3 12 0" fill="none" stroke="#3F2E20" stroke-width="3" stroke-linecap="round"/>
-            <circle cx="17" cy="31" r="3" fill="#E85D4A"/>
-            <circle cx="47" cy="31" r="3" fill="#E85D4A"/>
+            <circle cx="17" cy="31" r="3" fill="#E85D4A"/><circle cx="47" cy="31" r="3" fill="#E85D4A"/>
           </svg>
         </span>
-        <span class="brand-copy">
-          <strong>TacoBoard</strong>
-          <small>appreciation, with seasoning</small>
-        </span>
+        <span class="brand-copy"><strong>TacoBoard</strong><small>appreciation, with seasoning</small></span>
       </button>
 
-      <div class="topbar-actions">
+      <div class="topbar-actions board-only" id="boardActions" hidden>
+        <span class="role-pill" id="rolePill">Guest tortilla</span>
+        <button class="btn btn-ghost admin-only" id="shareBtn">🔗 Share</button>
         <button class="btn btn-ghost" id="addStickerBtn">✨ Sticker</button>
-        <button class="btn btn-ghost" id="openSettingsBtn">⚙️ Board</button>
+        <button class="btn btn-ghost admin-only" id="openSettingsBtn">⚙️ Board</button>
         <button class="btn btn-dark" id="exportMenuBtn">Save ▾</button>
         <div class="menu" id="exportMenu" hidden>
           <button id="exportPngBtn">Save as PNG</button>
           <button id="exportPdfBtn">Save as PDF</button>
           <button id="exportJsonBtn">Export board data</button>
-          <label class="menu-file">Import board data<input type="file" id="importJsonInput" accept="application/json"></label>
         </div>
       </div>
     </header>
 
     <main>
-      <section class="hero no-export-controls">
-        <div>
-          <div class="eyebrow">🌮 THE LEAST CORPORATE WAY TO SAY SOMETHING NICE</div>
-          <h1 id="boardTitleDisplay">A TacoBoard for Someone Awesome</h1>
-          <p id="boardSubtitleDisplay">Leave a note. Drop a GIF. Make it weirdly heartfelt.</p>
+      <section class="home" id="homeView">
+        <div class="home-grid">
+          <div class="home-copy">
+            <div class="eyebrow">🌮 CORPORATE APPRECIATION, DE-CORPORATIZED</div>
+            <h1>Say the nice thing.<br><span>Make it a taco.</span></h1>
+            <p class="lede">A shared wall for notes, GIFs, photos, stickers, and the kind of workplace affection that should never require a competency framework.</p>
+            <div class="feature-chips">
+              <span>💌 shared notes</span><span>🎞️ GIFs</span><span>✨ stickers</span><span>🧾 PDF keepsake</span>
+            </div>
+          </div>
+
+          <form class="create-card" id="createBoardForm">
+            <div class="tiny-taco">🌮</div>
+            <div class="eyebrow">MAKE A TACOBOARD</div>
+            <h2>Who are we feeding compliments to?</h2>
+            <label>Person / team / poor departing coworker
+              <input id="recipientInput" type="text" maxlength="60" placeholder="Stephanie" required />
+            </label>
+            <label>What's the occasion?
+              <input id="occasionInput" type="text" maxlength="110" placeholder="A heroic escape from this company" />
+            </label>
+            <button class="btn btn-taco btn-xl" id="createBoardBtn">Create TacoBoard 🌮</button>
+            <p class="create-help" id="createModeHelp">No account. No login. Just tacos.</p>
+          </form>
         </div>
-        <button class="btn btn-taco btn-large" id="addPostBtn">+ Add a taco note</button>
+
+        <section class="manifesto">
+          <div><strong>1.</strong><span>Make a board</span><small>Give it a person and an occasion.</small></div>
+          <div><strong>2.</strong><span>Send the taco link</span><small>People add notes, GIFs, and chaos.</small></div>
+          <div><strong>3.</strong><span>Serve it</span><small>Lock it, polish it, save the keepsake.</small></div>
+        </section>
       </section>
 
-      <div class="board-wrap">
-        <section class="board" id="board" aria-label="TacoBoard message board">
-          <div class="board-pattern" aria-hidden="true"></div>
-          <div class="empty-state" id="emptyState">
-            <div class="empty-taco">🌮</div>
-            <h2>First taco is on you.</h2>
-            <p>Add a note, a GIF, or a little chaos.</p>
-            <button class="btn btn-taco" id="emptyAddBtn">Add the first note</button>
+      <section id="boardView" hidden>
+        <section class="hero no-export-controls">
+          <div>
+            <div class="eyebrow" id="boardEyebrow">🌮 OPEN FOR TACO BUSINESS</div>
+            <h1 id="boardTitleDisplay">A TacoBoard for Someone Awesome</h1>
+            <p id="boardSubtitleDisplay">Leave a note. Drop a GIF. Make it weirdly heartfelt.</p>
           </div>
-          <div class="board-items" id="boardItems"></div>
+          <button class="btn btn-taco btn-large" id="addPostBtn">+ Add a taco note</button>
         </section>
-      </div>
 
-      <section class="footer-note no-export-controls">
-        <span>🌮 TacoBoard POC</span>
-        <span>Saved locally in this browser</span>
+        <div class="notice local-notice no-export-controls" id="localNotice" hidden>
+          <span>🧪</span><div><strong>Local preview mode.</strong> This board works, but other people won't see your changes until Supabase is configured.</div>
+        </div>
+        <div class="notice served-notice no-export-controls" id="servedNotice" hidden>
+          <span>🍽️</span><div><strong>This TacoBoard has been served.</strong> Contributions are closed, but the delicious evidence remains.</div>
+        </div>
+
+        <div class="board-wrap">
+          <section class="board" id="board" aria-label="TacoBoard message board">
+            <div class="board-pattern" aria-hidden="true"></div>
+            <div class="empty-state" id="emptyState">
+              <div class="empty-taco">🌮</div><h2>First taco is on you.</h2><p>Add a note, a GIF, or a little chaos.</p>
+              <button class="btn btn-taco" id="emptyAddBtn">Add the first note</button>
+            </div>
+            <div class="board-items" id="boardItems"></div>
+          </section>
+        </div>
+
+        <section class="footer-note no-export-controls">
+          <span id="boardStats">🌮 TacoBoard 2.0</span>
+          <span id="syncStatus">Connecting the salsa…</span>
+        </section>
       </section>
     </main>
   </div>
 
   <dialog id="postDialog" class="dialog">
     <form method="dialog" id="postForm">
-      <div class="dialog-head">
-        <div>
-          <div class="eyebrow">NEW TACO NOTE</div>
-          <h2>Say the nice thing.</h2>
-        </div>
-        <button class="icon-btn dialog-close" type="button" aria-label="Close">×</button>
-      </div>
-
-      <label>Your name
-        <input id="authorInput" type="text" maxlength="60" placeholder="Jonah" required />
-      </label>
-
-      <label>Message
-        <textarea id="messageInput" maxlength="700" rows="6" placeholder="Thanks for being the person who always..." required></textarea>
-        <span class="field-help"><span id="charCount">0</span>/700</span>
-      </label>
+      <div class="dialog-head"><div><div class="eyebrow">NEW TACO NOTE</div><h2>Say the nice thing.</h2></div><button class="icon-btn dialog-close" type="button" aria-label="Close">×</button></div>
+      <label>Your name<input id="authorInput" type="text" maxlength="60" placeholder="Jonah" required /></label>
+      <label>Message<textarea id="messageInput" maxlength="700" rows="6" placeholder="Thanks for being the person who always..." required></textarea><span class="field-help"><span id="charCount">0</span>/700</span></label>
 
       <div class="field-group">
         <span class="field-label">Add a GIF or photo <em>optional</em></span>
         <div class="media-tabs" role="tablist">
           <button type="button" class="media-tab active" data-media-tab="upload">Upload</button>
           <button type="button" class="media-tab" data-media-tab="url">Paste URL</button>
+          <button type="button" class="media-tab" data-media-tab="giphy" id="giphyTab">GIF search</button>
         </div>
         <div id="uploadPane" class="media-pane active">
-          <label class="dropzone" id="dropzone">
-            <input id="mediaFileInput" type="file" accept="image/*,.gif" />
-            <span class="drop-icon">🖼️</span>
-            <strong>Choose an image or GIF</strong>
-            <small>Uploaded media exports most reliably to PNG/PDF.</small>
-          </label>
+          <label class="dropzone" id="dropzone"><input id="mediaFileInput" type="file" accept="image/*,.gif" /><span class="drop-icon">🖼️</span><strong>Choose an image or GIF</strong><small>For this POC, uploads are embedded in the board. Keep them under 1.25 MB.</small></label>
         </div>
-        <div id="urlPane" class="media-pane">
-          <input id="mediaUrlInput" type="url" placeholder="https://media.giphy.com/.../giphy.gif" />
-          <small class="hint">Direct image/GIF URLs work best. Some sites block cross-origin exporting.</small>
+        <div id="urlPane" class="media-pane"><input id="mediaUrlInput" type="url" placeholder="https://media.giphy.com/.../giphy.gif" /><small class="hint">Direct image/GIF URLs work best.</small></div>
+        <div id="giphyPane" class="media-pane">
+          <div class="gif-search-row"><input id="giphySearchInput" type="text" maxlength="50" placeholder="Search reaction GIFs" /><button type="button" class="btn btn-dark" id="giphySearchBtn">Search</button></div>
+          <div class="gif-results" id="giphyResults"></div>
+          <small class="hint giphy-credit">Powered by GIPHY</small>
         </div>
         <div id="mediaPreview" class="media-preview" hidden></div>
       </div>
 
-      <div class="field-group">
-        <span class="field-label">Pick a card flavor</span>
-        <div class="swatches" id="colorSwatches"></div>
-      </div>
-
-      <div class="dialog-actions">
-        <button class="btn btn-ghost dialog-close" type="button">Cancel</button>
-        <button class="btn btn-taco" id="submitPostBtn" value="default">Drop it on the board 🌮</button>
-      </div>
+      <div class="field-group"><span class="field-label">Pick a card flavor</span><div class="swatches" id="colorSwatches"></div></div>
+      <div class="dialog-actions"><button class="btn btn-ghost dialog-close" type="button">Cancel</button><button class="btn btn-taco" id="submitPostBtn" value="default">Drop it on the board 🌮</button></div>
     </form>
   </dialog>
 
-  <dialog id="stickerDialog" class="dialog small-dialog">
-    <form method="dialog">
-      <div class="dialog-head">
-        <div>
-          <div class="eyebrow">TACO DRAWER</div>
-          <h2>Pick some nonsense.</h2>
-        </div>
-        <button class="icon-btn dialog-close" type="button" aria-label="Close">×</button>
-      </div>
-      <div class="sticker-grid" id="stickerGrid"></div>
-      <p class="hint center">Stickers can be dragged anywhere on the board.</p>
-    </form>
-  </dialog>
+  <dialog id="stickerDialog" class="dialog small-dialog"><form method="dialog"><div class="dialog-head"><div><div class="eyebrow">TACO DRAWER</div><h2>Pick some nonsense.</h2></div><button class="icon-btn dialog-close" type="button">×</button></div><div class="sticker-grid" id="stickerGrid"></div><p class="hint center">Admin can drag stickers anywhere on the board.</p></form></dialog>
 
   <dialog id="settingsDialog" class="dialog small-dialog">
     <form method="dialog" id="settingsForm">
-      <div class="dialog-head">
-        <div>
-          <div class="eyebrow">BOARD SETTINGS</div>
-          <h2>Make it theirs.</h2>
-        </div>
-        <button class="icon-btn dialog-close" type="button" aria-label="Close">×</button>
-      </div>
-      <label>Board title
-        <input id="boardTitleInput" type="text" maxlength="90" />
-      </label>
-      <label>Subtitle
-        <input id="boardSubtitleInput" type="text" maxlength="140" />
-      </label>
-      <div class="field-group">
-        <span class="field-label">Board vibe</span>
-        <div class="theme-grid" id="themeGrid"></div>
-      </div>
-      <div class="dialog-actions split-actions">
-        <button type="button" class="btn btn-danger-soft" id="resetBoardBtn">Reset demo</button>
-        <button class="btn btn-taco" id="saveSettingsBtn" value="default">Save board</button>
-      </div>
+      <div class="dialog-head"><div><div class="eyebrow">BOARD SETTINGS</div><h2>Make it theirs.</h2></div><button class="icon-btn dialog-close" type="button">×</button></div>
+      <label>Board title<input id="boardTitleInput" type="text" maxlength="90" /></label>
+      <label>Subtitle<input id="boardSubtitleInput" type="text" maxlength="140" /></label>
+      <div class="field-group"><span class="field-label">Board vibe</span><div class="theme-grid" id="themeGrid"></div></div>
+      <div class="serve-box"><div><strong id="serveTitle">Ready to serve?</strong><small id="serveHelp">Close contributions and turn this into the finished keepsake.</small></div><button type="button" class="btn btn-dark" id="toggleServeBtn">🍽️ Serve board</button></div>
+      <div class="dialog-actions"><button class="btn btn-taco" id="saveSettingsBtn" value="default">Save board</button></div>
     </form>
   </dialog>
 
+  <dialog id="shareDialog" class="dialog small-dialog">
+    <form method="dialog">
+      <div class="dialog-head"><div><div class="eyebrow">PASS THE TACOS</div><h2>Share the board.</h2></div><button class="icon-btn dialog-close" type="button">×</button></div>
+      <div class="share-block"><span>Contributor link</span><p>Send this one around. People can add notes without becoming board gods.</p><div class="copy-row"><input id="contributorLinkInput" readonly /><button type="button" class="btn btn-taco" data-copy="contributorLinkInput">Copy</button></div></div>
+      <div class="share-block admin-link-block"><span>Admin link</span><p>Keep this one to yourself. It can edit, rearrange, serve, and delete.</p><div class="copy-row"><input id="adminLinkInput" readonly /><button type="button" class="btn btn-dark" data-copy="adminLinkInput">Copy</button></div></div>
+      <div class="share-warning">🌶️ Anyone with the admin link has admin powers. Treat it like the last good taco.</div>
+    </form>
+  </dialog>
+
+  <dialog id="errorDialog" class="dialog small-dialog"><form method="dialog"><div class="dialog-head"><div><div class="eyebrow">TACO PROBLEM</div><h2 id="errorTitle">We dropped the salsa.</h2></div><button class="icon-btn dialog-close" type="button">×</button></div><p id="errorMessage" class="dialog-message"></p><div class="dialog-actions"><button class="btn btn-taco dialog-close" type="button">Okay 🌮</button></div></form></dialog>
+
+  <div class="taco-rain" id="tacoRain" aria-hidden="true"></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

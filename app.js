@@ -1,82 +1,80 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'tacoboard:poc:v1';
   const COLORS = ['#fff4b8', '#ffd9c8', '#d9edc7', '#d7e9ff', '#ead9ff', '#ffffff'];
-  const THEMES = ['fiesta', 'verde', 'night', 'sunset', 'paper'];
+  const THEMES = ['fiesta', 'verde', 'night', 'sunset', 'paper', 'corporate'];
   const STICKERS = ['🌮','🌶️','🥑','🧀','🍋‍🟩','🔥','✨','💛','🎉','🤠','🫶','💯','🏆','🪩','😎','🦖','👑','🚀','🍻','🤘'];
+  const MAX_UPLOAD = 1.25 * 1024 * 1024;
+  const CONFIG = window.TACOBOARD_CONFIG || {};
+  const isRemote = Boolean(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_PUBLISHABLE_KEY && window.supabase?.createClient);
+  const client = isRemote ? window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY) : null;
 
-  const seed = {
-    title: 'A TacoBoard for Someone Awesome',
-    subtitle: 'Leave a note. Drop a GIF. Make it weirdly heartfelt.',
-    theme: 'fiesta',
-    posts: [],
-    stickers: [
-      { id: cryptoId(), emoji: '🌮', x: 72, y: 70, rotation: -10, size: 1.18 },
-      { id: cryptoId(), emoji: '✨', x: 83, y: 76, rotation: 9, size: .82 }
-    ]
+  let current = {
+    slug: '', token: '', role: 'contributor', isAdmin: false,
+    contributorToken: '', board: null, posts: [], stickers: []
   };
-
-  let state = loadState();
   let selectedColor = COLORS[0];
   let editingPostId = null;
   let uploadedMediaData = '';
+  let selectedGifUrl = '';
   let dragState = null;
   let toastTimer = null;
+  let realtimeChannel = null;
+  let refreshTimer = null;
+  let isRefreshing = false;
 
   const $ = (id) => document.getElementById(id);
-  const board = $('board');
+  const boardEl = $('board');
   const boardItems = $('boardItems');
-  const emptyState = $('emptyState');
   const postDialog = $('postDialog');
-  const stickerDialog = $('stickerDialog');
   const settingsDialog = $('settingsDialog');
-  const postForm = $('postForm');
+  const stickerDialog = $('stickerDialog');
+  const shareDialog = $('shareDialog');
 
-  setupStaticUI();
-  render();
+  setupUI();
+  boot();
 
-  function setupStaticUI() {
+  function setupUI() {
+    $('brandButton').addEventListener('click', goHome);
+    $('createBoardForm').addEventListener('submit', createBoard);
     $('addPostBtn').addEventListener('click', () => openPostDialog());
     $('emptyAddBtn').addEventListener('click', () => openPostDialog());
     $('addStickerBtn').addEventListener('click', () => stickerDialog.showModal());
     $('openSettingsBtn').addEventListener('click', openSettings);
+    $('shareBtn').addEventListener('click', openShare);
     $('messageInput').addEventListener('input', updateCharCount);
-    $('postForm').addEventListener('submit', handlePostSubmit);
-    $('settingsForm').addEventListener('submit', handleSettingsSubmit);
-    $('resetBoardBtn').addEventListener('click', resetBoard);
-
-    document.querySelectorAll('.dialog-close').forEach(btn => {
-      btn.addEventListener('click', () => btn.closest('dialog')?.close());
-    });
+    $('postForm').addEventListener('submit', submitPost);
+    $('settingsForm').addEventListener('submit', saveSettings);
+    $('toggleServeBtn').addEventListener('click', toggleServed);
 
     $('exportMenuBtn').addEventListener('click', (event) => {
       event.stopPropagation();
       $('exportMenu').hidden = !$('exportMenu').hidden;
     });
     document.addEventListener('click', () => { $('exportMenu').hidden = true; });
-    $('exportMenu').addEventListener('click', (e) => e.stopPropagation());
-
+    $('exportMenu').addEventListener('click', e => e.stopPropagation());
     $('exportPngBtn').addEventListener('click', exportPNG);
     $('exportPdfBtn').addEventListener('click', exportPDF);
     $('exportJsonBtn').addEventListener('click', exportJSON);
-    $('importJsonInput').addEventListener('change', importJSON);
+
+    document.querySelectorAll('.dialog-close').forEach(btn => btn.addEventListener('click', () => btn.closest('dialog')?.close()));
+    document.querySelectorAll('[data-copy]').forEach(btn => btn.addEventListener('click', () => copyField(btn.dataset.copy)));
 
     $('mediaFileInput').addEventListener('change', handleMediaUpload);
     $('mediaUrlInput').addEventListener('input', () => {
       uploadedMediaData = '';
+      selectedGifUrl = '';
       renderMediaPreview($('mediaUrlInput').value.trim());
     });
-
-    document.querySelectorAll('.media-tab').forEach(btn => {
-      btn.addEventListener('click', () => switchMediaTab(btn.dataset.mediaTab));
+    document.querySelectorAll('.media-tab').forEach(btn => btn.addEventListener('click', () => switchMediaTab(btn.dataset.mediaTab)));
+    $('giphySearchBtn').addEventListener('click', searchGiphy);
+    $('giphySearchInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); searchGiphy(); }
     });
 
     COLORS.forEach((color, index) => {
       const swatch = document.createElement('button');
-      swatch.type = 'button';
-      swatch.className = 'swatch' + (index === 0 ? ' selected' : '');
-      swatch.style.background = color;
+      swatch.type = 'button'; swatch.className = 'swatch' + (index === 0 ? ' selected' : ''); swatch.style.background = color;
       swatch.setAttribute('aria-label', `Card color ${index + 1}`);
       swatch.addEventListener('click', () => {
         selectedColor = color;
@@ -87,23 +85,14 @@
 
     STICKERS.forEach(emoji => {
       const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'sticker-choice';
-      button.textContent = emoji;
-      button.setAttribute('aria-label', `Add ${emoji} sticker`);
-      button.addEventListener('click', () => {
-        addSticker(emoji);
-        stickerDialog.close();
-      });
+      button.type = 'button'; button.className = 'sticker-choice'; button.textContent = emoji;
+      button.addEventListener('click', async () => { stickerDialog.close(); await addSticker(emoji); });
       $('stickerGrid').appendChild(button);
     });
 
     THEMES.forEach(theme => {
       const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'theme-choice';
-      button.dataset.theme = theme;
-      button.title = theme;
+      button.type = 'button'; button.className = 'theme-choice'; button.dataset.theme = theme; button.title = theme === 'corporate' ? 'Corporate Beige (tragic)' : theme;
       button.addEventListener('click', () => {
         document.querySelectorAll('.theme-choice').forEach(t => t.classList.toggle('selected', t === button));
         $('themeGrid').dataset.selected = theme;
@@ -111,461 +100,408 @@
       $('themeGrid').appendChild(button);
     });
 
-    boardItems.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    boardItems.addEventListener('pointerdown', beginDrag);
+    window.addEventListener('pointermove', moveDrag, { passive: false });
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
+    window.addEventListener('resize', () => { if (current.board) { clampItems(); renderBoard(); } });
 
-    window.addEventListener('resize', () => {
-      clampAllItemsToBoard();
-      render();
-    });
+    if (!CONFIG.GIPHY_API_KEY) {
+      $('giphyTab').title = 'Add a GIPHY API key in config.js to enable search';
+    }
   }
 
-  function render() {
-    board.dataset.theme = state.theme || 'fiesta';
-    $('boardTitleDisplay').textContent = state.title;
-    $('boardSubtitleDisplay').textContent = state.subtitle;
-    boardItems.innerHTML = '';
+  async function boot() {
+    if (!isRemote) {
+      $('createModeHelp').textContent = 'Local preview mode — add Supabase config when you are ready to share.';
+    }
+    const params = new URLSearchParams(location.search);
+    const slug = params.get('board');
+    const admin = params.get('admin');
+    const key = params.get('key');
+    if (!slug) return showHome();
+    current.slug = slug;
+    current.token = admin || key || '';
+    current.isAdmin = Boolean(admin);
+    current.role = current.isAdmin ? 'admin' : 'contributor';
+    if (!current.token && !isRemote) current.token = 'local-admin';
+    if (!current.token) return showFatal('Missing taco key', 'This TacoBoard link is incomplete. Ask the board owner for the contributor link again.');
+    await loadBoard(true);
+  }
 
-    state.posts.forEach((post, index) => boardItems.appendChild(createPostElement(post, index)));
-    state.stickers.forEach(sticker => boardItems.appendChild(createStickerElement(sticker)));
-    emptyState.hidden = state.posts.length > 0;
+  function showHome() {
+    teardownRealtime();
+    $('homeView').hidden = false;
+    $('boardView').hidden = true;
+    $('boardActions').hidden = true;
+    document.title = 'TacoBoard 🌮';
+  }
+
+  function showBoardView() {
+    $('homeView').hidden = true;
+    $('boardView').hidden = false;
+    $('boardActions').hidden = false;
+    document.title = `${current.board?.title || 'TacoBoard'} 🌮`;
+  }
+
+  function goHome() {
+    history.pushState({}, '', location.pathname);
+    current = { slug:'', token:'', role:'contributor', isAdmin:false, contributorToken:'', board:null, posts:[], stickers:[] };
+    showHome();
+  }
+
+  async function createBoard(event) {
+    event.preventDefault();
+    const recipient = $('recipientInput').value.trim();
+    const occasion = $('occasionInput').value.trim();
+    if (!recipient) return;
+    setBusy($('createBoardBtn'), true, 'Warming tortillas…');
+    try {
+      const title = `A TacoBoard for ${recipient}`;
+      const subtitle = occasion || 'Leave a note. Drop a GIF. Make it weirdly heartfelt.';
+      const created = isRemote ? await remoteCreateBoard(title, subtitle) : localCreateBoard(title, subtitle);
+      current.slug = created.slug;
+      current.token = created.admin_token;
+      current.isAdmin = true;
+      current.role = 'admin';
+      current.contributorToken = created.contributor_token;
+      const url = buildBoardUrl({ slug: created.slug, admin: created.admin_token });
+      history.replaceState({}, '', url);
+      await loadBoard(true);
+      openShare();
+      showToast(isRemote ? 'Fresh TacoBoard, ready to share 🌮' : 'Local TacoBoard created 🌮');
+    } catch (err) {
+      handleError(err, 'Could not create the TacoBoard');
+    } finally {
+      setBusy($('createBoardBtn'), false, 'Create TacoBoard 🌮');
+    }
+  }
+
+  async function loadBoard(initial = false) {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    if (initial) $('syncStatus').textContent = 'Connecting the salsa…';
+    try {
+      const data = isRemote ? await remoteGetBoard() : localGetBoard();
+      if (!data?.board) throw new Error('Board not found or taco key is invalid.');
+      current.board = data.board;
+      current.posts = data.posts || [];
+      current.stickers = data.stickers || [];
+      current.isAdmin = Boolean(data.is_admin ?? current.isAdmin);
+      current.role = current.isAdmin ? 'admin' : 'contributor';
+      current.contributorToken = data.contributor_token || current.contributorToken || '';
+      showBoardView();
+      renderBoard();
+      updateRoleUI();
+      $('localNotice').hidden = isRemote;
+      $('syncStatus').textContent = isRemote ? 'Shared board • live-ish salsa sync' : 'Saved locally in this browser';
+      if (isRemote && initial) setupRealtime();
+    } catch (err) {
+      if (initial) showFatal('TacoBoard unavailable', friendlyError(err)); else console.error(err);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
+  function renderBoard() {
+    const b = current.board;
+    if (!b) return;
+    boardEl.dataset.theme = b.theme || 'fiesta';
+    $('boardTitleDisplay').textContent = b.title;
+    $('boardSubtitleDisplay').textContent = b.subtitle;
+    $('boardEyebrow').textContent = b.status === 'served' ? '🍽️ THIS TACOBOARD HAS BEEN SERVED' : '🌮 OPEN FOR TACO BUSINESS';
+    $('servedNotice').hidden = b.status !== 'served';
+    $('addPostBtn').hidden = b.status === 'served';
+    $('emptyAddBtn').hidden = b.status === 'served';
+    boardItems.innerHTML = '';
+    current.posts.forEach((post, index) => boardItems.appendChild(createPostElement(post, index)));
+    current.stickers.forEach(sticker => boardItems.appendChild(createStickerElement(sticker)));
+    $('emptyState').hidden = current.posts.length > 0;
+    $('boardStats').textContent = `🌮 ${current.posts.length} taco${current.posts.length === 1 ? '' : 's'} • ${current.stickers.length} questionable sticker${current.stickers.length === 1 ? '' : 's'}`;
     requestAnimationFrame(updateBoardHeight);
+  }
+
+  function updateRoleUI() {
+    document.querySelectorAll('.admin-only').forEach(el => el.hidden = !current.isAdmin);
+    $('addStickerBtn').hidden = current.board?.status === 'served';
+    $('rolePill').textContent = current.isAdmin ? '🌶️ Board boss' : '🌮 Taco contributor';
+    if (current.board?.status === 'served') $('rolePill').textContent = current.isAdmin ? '🍽️ Served • admin' : '🍽️ Served';
   }
 
   function createPostElement(post, index) {
     const el = document.createElement('article');
-    el.className = 'note-card';
-    el.dataset.id = post.id;
-    el.dataset.kind = 'post';
-    el.style.background = post.color;
-    el.style.left = `${post.x}%`;
-    el.style.top = `${post.y}px`;
-    el.style.transform = `rotate(${post.rotation}deg)`;
-    el.style.zIndex = String(10 + index);
-
-    const grip = document.createElement('span');
-    grip.className = 'card-grip';
-    grip.textContent = '•••';
-    el.appendChild(grip);
-
+    el.className = 'note-card' + (current.isAdmin ? ' admin-draggable' : '');
+    el.dataset.id = post.id; el.dataset.kind = 'post';
+    el.style.background = post.color || COLORS[0]; el.style.left = `${Number(post.x) || 0}%`; el.style.top = `${Number(post.y) || 0}px`; el.style.transform = `rotate(${Number(post.rotation) || 0}deg)`; el.style.zIndex = String(10 + index);
+    const grip = document.createElement('span'); grip.className = 'card-grip'; grip.textContent = current.isAdmin ? '•••' : '🌮'; el.appendChild(grip);
     if (post.media) {
-      const media = document.createElement('div');
-      media.className = 'media';
-      const img = document.createElement('img');
-      img.alt = '';
-      img.loading = 'eager';
+      const media = document.createElement('div'); media.className = 'media';
+      const img = document.createElement('img'); img.alt = ''; img.loading = 'eager';
       if (!post.media.startsWith('data:') && !post.media.startsWith('blob:')) img.crossOrigin = 'anonymous';
-      img.src = post.media;
-      img.onload = () => updateBoardHeight();
-      img.onerror = () => { media.remove(); updateBoardHeight(); };
-      media.appendChild(img);
-      el.appendChild(media);
+      img.src = post.media; img.onload = updateBoardHeight; img.onerror = () => { media.remove(); updateBoardHeight(); };
+      media.appendChild(img); el.appendChild(media);
     }
-
-    const message = document.createElement('div');
-    message.className = 'message';
-    message.textContent = post.message;
-    el.appendChild(message);
-
-    const author = document.createElement('div');
-    author.className = 'author';
-    const avatar = document.createElement('span');
-    avatar.className = 'avatar';
-    avatar.textContent = getInitial(post.author);
-    const name = document.createElement('span');
-    name.textContent = post.author;
-    author.append(avatar, name);
-
-    const actions = document.createElement('span');
-    actions.className = 'card-actions no-export-controls';
-    const editBtn = miniButton('✏️', 'Edit note', (e) => { e.stopPropagation(); openPostDialog(post.id); });
-    const deleteBtn = miniButton('×', 'Delete note', (e) => { e.stopPropagation(); deletePost(post.id); });
-    actions.append(editBtn, deleteBtn);
-    author.appendChild(actions);
-    el.appendChild(author);
-    return el;
+    const message = document.createElement('div'); message.className = 'message'; message.textContent = post.message; el.appendChild(message);
+    const author = document.createElement('div'); author.className = 'author';
+    const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.textContent = getInitial(post.author);
+    const name = document.createElement('span'); name.textContent = post.author; author.append(avatar, name);
+    if (current.isAdmin) {
+      const actions = document.createElement('span'); actions.className = 'card-actions no-export-controls';
+      actions.append(miniButton('✏️','Edit note',e => { e.stopPropagation(); openPostDialog(post.id); }), miniButton('×','Delete note',e => { e.stopPropagation(); deletePost(post.id); }));
+      author.appendChild(actions);
+    }
+    el.appendChild(author); return el;
   }
 
   function createStickerElement(sticker) {
     const el = document.createElement('div');
-    el.className = 'board-sticker';
-    el.dataset.id = sticker.id;
-    el.dataset.kind = 'sticker';
-    el.style.left = `${sticker.x}%`;
-    el.style.top = `${sticker.y}px`;
-    el.style.transform = `rotate(${sticker.rotation}deg) scale(${sticker.size || 1})`;
-    el.textContent = sticker.emoji;
-
-    const remove = document.createElement('button');
-    remove.className = 'remove-sticker no-export-controls';
-    remove.textContent = '×';
-    remove.setAttribute('aria-label', 'Remove sticker');
-    remove.addEventListener('click', (e) => {
-      e.stopPropagation();
-      state.stickers = state.stickers.filter(s => s.id !== sticker.id);
-      saveState();
-      render();
-    });
-    el.appendChild(remove);
+    el.className = 'board-sticker' + (current.isAdmin ? ' admin-draggable' : '');
+    el.dataset.id = sticker.id; el.dataset.kind = 'sticker'; el.style.left = `${Number(sticker.x) || 0}%`; el.style.top = `${Number(sticker.y) || 0}px`; el.style.transform = `rotate(${Number(sticker.rotation) || 0}deg) scale(${Number(sticker.size) || 1})`; el.append(document.createTextNode(sticker.emoji));
+    if (current.isAdmin) {
+      const remove = document.createElement('button'); remove.className = 'remove-sticker no-export-controls'; remove.textContent = '×'; remove.setAttribute('aria-label','Remove sticker');
+      remove.addEventListener('click', async e => { e.stopPropagation(); await deleteSticker(sticker.id); }); el.appendChild(remove);
+    }
     return el;
   }
 
-  function miniButton(text, label, fn) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'card-mini-btn';
-    btn.textContent = text;
-    btn.setAttribute('aria-label', label);
-    btn.addEventListener('click', fn);
-    return btn;
-  }
+  function miniButton(text, label, fn) { const b=document.createElement('button'); b.type='button'; b.className='card-mini-btn'; b.textContent=text; b.setAttribute('aria-label',label); b.addEventListener('click',fn); return b; }
 
   function openPostDialog(postId = null) {
+    if (current.board?.status === 'served' && !current.isAdmin) return showToast('This board has already been served 🍽️');
     editingPostId = postId;
-    const post = postId ? state.posts.find(p => p.id === postId) : null;
+    const post = postId ? current.posts.find(p => p.id === postId) : null;
+    if (post && !current.isAdmin) return;
     $('authorInput').value = post?.author || localStorage.getItem('tacoboard:last-author') || '';
     $('messageInput').value = post?.message || '';
-    selectedColor = post?.color || COLORS[Math.floor(Math.random() * COLORS.length)];
-    $('mediaUrlInput').value = post && !post.media?.startsWith('data:') ? post.media : '';
+    selectedColor = post?.color || COLORS[Math.floor(Math.random()*COLORS.length)];
     uploadedMediaData = post?.media?.startsWith('data:') ? post.media : '';
-    $('mediaFileInput').value = '';
+    selectedGifUrl = '';
+    $('mediaUrlInput').value = post && !post.media?.startsWith('data:') ? post.media : '';
+    $('mediaFileInput').value = ''; $('giphyResults').innerHTML = ''; $('giphySearchInput').value = '';
     renderMediaPreview(post?.media || '');
     document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('selected', rgbToHex(s.style.backgroundColor) === selectedColor.toLowerCase()));
     updateCharCount();
     $('submitPostBtn').textContent = post ? 'Update taco note 🌮' : 'Drop it on the board 🌮';
-    postDialog.showModal();
-    setTimeout(() => (post ? $('messageInput') : $('authorInput')).focus(), 30);
+    postDialog.showModal(); setTimeout(() => (post ? $('messageInput') : $('authorInput')).focus(), 30);
   }
 
-  function handlePostSubmit(event) {
+  async function submitPost(event) {
     event.preventDefault();
-    const author = $('authorInput').value.trim();
-    const message = $('messageInput').value.trim();
+    const author = $('authorInput').value.trim(), message = $('messageInput').value.trim();
     if (!author || !message) return;
-
-    const media = uploadedMediaData || $('mediaUrlInput').value.trim();
+    const media = uploadedMediaData || selectedGifUrl || $('mediaUrlInput').value.trim();
     localStorage.setItem('tacoboard:last-author', author);
-
-    if (editingPostId) {
-      const post = state.posts.find(p => p.id === editingPostId);
-      if (post) Object.assign(post, { author, message, media, color: selectedColor });
-      showToast('Taco note updated');
-    } else {
-      const position = nextPostPosition();
-      state.posts.push({
-        id: cryptoId(), author, message, media, color: selectedColor,
-        x: position.x, y: position.y, rotation: randomBetween(-3.2, 3.2)
-      });
-      showToast('Taco delivered 🌮');
-    }
-
-    saveState();
-    postDialog.close();
-    render();
+    setBusy($('submitPostBtn'), true, 'Adding salsa…');
+    try {
+      if (editingPostId) {
+        if (!current.isAdmin) throw new Error('Only the board admin can edit notes.');
+        await mutate('update_post', { post_id: editingPostId, author, message, media, color: selectedColor });
+        showToast('Taco note updated');
+      } else {
+        const pos = nextPostPosition();
+        await mutate('add_post', { author, message, media, color:selectedColor, x:pos.x, y:pos.y, rotation:randomBetween(-2.7,2.7) });
+        rainTacos(); showToast('Taco delivered 🌮');
+      }
+      postDialog.close();
+      await loadBoard();
+      broadcastRefresh();
+    } catch (err) { handleError(err, 'Could not add that taco'); }
+    finally { setBusy($('submitPostBtn'), false, editingPostId ? 'Update taco note 🌮' : 'Drop it on the board 🌮'); editingPostId = null; }
   }
 
-  function deletePost(id) {
-    if (!confirm('Remove this taco note from the board?')) return;
-    state.posts = state.posts.filter(p => p.id !== id);
-    saveState();
-    render();
-    showToast('Note removed');
+  async function deletePost(id) {
+    if (!current.isAdmin || !confirm('Delete this taco note?')) return;
+    try { await mutate('delete_post',{post_id:id}); await loadBoard(); broadcastRefresh(); showToast('Taco note removed'); } catch(err){ handleError(err,'Could not delete that note'); }
   }
 
-  function addSticker(emoji) {
-    state.stickers.push({
-      id: cryptoId(), emoji,
-      x: randomBetween(8, 85), y: randomBetween(60, Math.max(80, board.clientHeight - 120)),
-      rotation: randomBetween(-16, 16), size: randomBetween(.78, 1.22)
-    });
-    saveState();
-    render();
-    showToast(`${emoji} sticker added`);
+  async function addSticker(emoji) {
+    if (current.board?.status === 'served') return showToast('This board has already been served 🍽️');
+    const y = 55 + Math.random() * Math.max(180, boardItems.clientHeight - 160);
+    try { await mutate('add_sticker',{emoji,x:65+Math.random()*22,y,rotation:randomBetween(-15,15),size:randomBetween(.78,1.2)}); await loadBoard(); broadcastRefresh(); showToast(`${emoji} deployed`); } catch(err){ handleError(err,'Could not add that sticker'); }
+  }
+
+  async function deleteSticker(id) {
+    if (!current.isAdmin) return;
+    try { await mutate('delete_sticker',{sticker_id:id}); await loadBoard(); broadcastRefresh(); } catch(err){ handleError(err,'Could not remove that sticker'); }
   }
 
   function openSettings() {
-    $('boardTitleInput').value = state.title;
-    $('boardSubtitleInput').value = state.subtitle;
-    $('themeGrid').dataset.selected = state.theme;
-    document.querySelectorAll('.theme-choice').forEach(t => t.classList.toggle('selected', t.dataset.theme === state.theme));
-    settingsDialog.showModal();
+    if (!current.isAdmin || !current.board) return;
+    $('boardTitleInput').value = current.board.title; $('boardSubtitleInput').value = current.board.subtitle; $('themeGrid').dataset.selected = current.board.theme;
+    document.querySelectorAll('.theme-choice').forEach(t => t.classList.toggle('selected', t.dataset.theme === current.board.theme));
+    updateServeUI(); settingsDialog.showModal();
   }
 
-  function handleSettingsSubmit(event) {
+  async function saveSettings(event) {
     event.preventDefault();
-    state.title = $('boardTitleInput').value.trim() || seed.title;
-    state.subtitle = $('boardSubtitleInput').value.trim() || seed.subtitle;
-    state.theme = $('themeGrid').dataset.selected || state.theme;
-    saveState();
-    settingsDialog.close();
-    render();
-    showToast('Board updated');
+    const title = $('boardTitleInput').value.trim(), subtitle = $('boardSubtitleInput').value.trim(), theme = $('themeGrid').dataset.selected || current.board.theme;
+    if (!title) return;
+    try { await mutate('update_board',{title,subtitle,theme}); settingsDialog.close(); await loadBoard(); broadcastRefresh(); showToast('Board seasoned to taste'); } catch(err){ handleError(err,'Could not save board settings'); }
   }
 
-  function resetBoard() {
-    if (!confirm('Reset the entire TacoBoard? This clears all notes and stickers.')) return;
-    state = structuredCloneSafe(seed);
-    saveState();
-    settingsDialog.close();
-    render();
-    showToast('Fresh tortilla, fresh board');
+  function updateServeUI() {
+    const served = current.board?.status === 'served';
+    $('serveTitle').textContent = served ? 'Board already served.' : 'Ready to serve?';
+    $('serveHelp').textContent = served ? 'Reopen it if somebody forgot to say the nice thing.' : 'Close contributions and turn this into the finished keepsake.';
+    $('toggleServeBtn').textContent = served ? '🌮 Reopen board' : '🍽️ Serve board';
   }
 
-  function updateBoardHeight() {
-    let maxBottom = 690;
-    boardItems.querySelectorAll('[data-kind]').forEach(el => {
-      maxBottom = Math.max(maxBottom, el.offsetTop + el.offsetHeight + 42);
-    });
-    boardItems.style.height = `${maxBottom}px`;
+  async function toggleServed() {
+    if (!current.isAdmin) return;
+    const next = current.board.status === 'served' ? 'open' : 'served';
+    if (next === 'served' && !confirm('Serve this TacoBoard? Contributors will no longer be able to add notes until you reopen it.')) return;
+    try { await mutate('set_status',{status:next}); await loadBoard(); broadcastRefresh(); updateServeUI(); showToast(next === 'served' ? 'TacoBoard served 🍽️' : 'Kitchen reopened 🌮'); } catch(err){ handleError(err,'Could not change board status'); }
+  }
+
+  function openShare() {
+    if (!current.isAdmin) return;
+    if (!current.contributorToken && isRemote) return showToast('Reload the admin link to recover sharing controls');
+    $('contributorLinkInput').value = buildBoardUrl({ slug:current.slug, key:current.contributorToken || 'local' });
+    $('adminLinkInput').value = buildBoardUrl({ slug:current.slug, admin:current.token });
+    shareDialog.showModal();
+  }
+
+  async function copyField(id) {
+    const value = $(id).value;
+    try { await navigator.clipboard.writeText(value); showToast('Copied. Pass the tacos 🌮'); }
+    catch { $(id).select(); document.execCommand('copy'); showToast('Copied 🌮'); }
+  }
+
+  function beginDrag(event) {
+    if (!current.isAdmin || (event.button !== undefined && event.button !== 0)) return;
+    if (event.target.closest('button') || event.target.closest('.message')) return;
+    const item = event.target.closest('[data-kind]'); if (!item) return;
+    const record = item.dataset.kind === 'post' ? current.posts.find(p=>p.id===item.dataset.id) : current.stickers.find(s=>s.id===item.dataset.id); if (!record) return;
+    const boardRect = boardItems.getBoundingClientRect(), itemRect = item.getBoundingClientRect();
+    dragState = { id:item.dataset.id, kind:item.dataset.kind, item, boardRect, offsetX:event.clientX-itemRect.left, offsetY:event.clientY-itemRect.top };
+    item.classList.add('dragging'); item.setPointerCapture?.(event.pointerId); event.preventDefault();
+  }
+
+  function moveDrag(event) {
+    if (!dragState) return;
+    const {item,boardRect,offsetX,offsetY,kind,id}=dragState;
+    const xPx=clamp(event.clientX-boardRect.left-offsetX,0,Math.max(0,boardRect.width-item.offsetWidth));
+    const yPx=clamp(event.clientY-boardRect.top-offsetY,0,Math.max(0,boardRect.height-item.offsetHeight));
+    item.style.left=`${(xPx/boardRect.width)*100}%`; item.style.top=`${yPx}px`;
+    const record=kind==='post'?current.posts.find(p=>p.id===id):current.stickers.find(s=>s.id===id); if(record){record.x=(xPx/boardRect.width)*100;record.y=yPx;}
+    event.preventDefault();
+  }
+
+  async function endDrag() {
+    if (!dragState) return;
+    const d=dragState; d.item.classList.remove('dragging'); dragState=null;
+    const record=d.kind==='post'?current.posts.find(p=>p.id===d.id):current.stickers.find(s=>s.id===d.id); if(!record)return;
+    try { await mutate(d.kind==='post'?'move_post':'move_sticker',{[d.kind==='post'?'post_id':'sticker_id']:d.id,x:record.x,y:record.y}); broadcastRefresh(); } catch(err){ console.error(err); showToast('That taco wandered off. Refreshing…'); await loadBoard(); }
+  }
+
+  function clampItems() {
+    const width=boardEl.clientWidth||1200, maxPostX=Math.max(2,100-((310+15)/width*100));
+    current.posts.forEach(p=>{p.x=clamp(Number(p.x)||0,0,maxPostX);p.y=Math.max(0,Number(p.y)||0)}); current.stickers.forEach(s=>{s.x=clamp(Number(s.x)||0,0,94);s.y=Math.max(0,Number(s.y)||0)});
   }
 
   function nextPostPosition() {
-    const width = board.clientWidth || 1200;
-    const cardWidth = width < 650 ? Math.min(310, width - 48) : 310;
-    const colWidth = cardWidth + 24;
-    const cols = Math.max(1, Math.floor((width - 40) / colWidth));
-    const index = state.posts.length;
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    const xPx = 20 + col * colWidth + randomBetween(-5, 8);
-    return {
-      x: clamp((xPx / width) * 100, 1.5, Math.max(1.5, 100 - ((cardWidth + 15) / width * 100))),
-      y: 26 + row * 245 + randomBetween(-4, 12)
-    };
+    const width=boardEl.clientWidth||1200, cardWidth=width<650?Math.min(310,width-48):310, colWidth=cardWidth+24, cols=Math.max(1,Math.floor((width-40)/colWidth)), index=current.posts.length, col=index%cols,row=Math.floor(index/cols),xPx=20+col*colWidth+randomBetween(-5,8);
+    return {x:clamp((xPx/width)*100,1.5,Math.max(1.5,100-((cardWidth+15)/width*100))),y:26+row*245+randomBetween(-4,12)};
   }
 
-  function handlePointerDown(event) {
-    if (event.button !== undefined && event.button !== 0) return;
-    if (event.target.closest('button') || event.target.closest('.message')) return;
-    const item = event.target.closest('[data-kind]');
-    if (!item) return;
-    const id = item.dataset.id;
-    const kind = item.dataset.kind;
-    const record = kind === 'post' ? state.posts.find(p => p.id === id) : state.stickers.find(s => s.id === id);
-    if (!record) return;
-
-    const boardRect = boardItems.getBoundingClientRect();
-    const itemRect = item.getBoundingClientRect();
-    dragState = {
-      id, kind, item, boardRect,
-      offsetX: event.clientX - itemRect.left,
-      offsetY: event.clientY - itemRect.top,
-      pointerId: event.pointerId
-    };
-    item.classList.add('dragging');
-    item.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
-  }
-
-  function handlePointerMove(event) {
-    if (!dragState) return;
-    const { item, boardRect, offsetX, offsetY, kind, id } = dragState;
-    const itemWidth = item.offsetWidth;
-    const itemHeight = item.offsetHeight;
-    const xPx = clamp(event.clientX - boardRect.left - offsetX, 0, Math.max(0, boardRect.width - itemWidth));
-    const yPx = clamp(event.clientY - boardRect.top - offsetY, 0, Math.max(0, boardRect.height - itemHeight));
-    item.style.left = `${(xPx / boardRect.width) * 100}%`;
-    item.style.top = `${yPx}px`;
-
-    const record = kind === 'post' ? state.posts.find(p => p.id === id) : state.stickers.find(s => s.id === id);
-    if (record) { record.x = (xPx / boardRect.width) * 100; record.y = yPx; }
-    event.preventDefault();
-  }
-
-  function endDrag() {
-    if (!dragState) return;
-    dragState.item.classList.remove('dragging');
-    saveState();
-    dragState = null;
-  }
-
-  function clampAllItemsToBoard() {
-    const width = board.clientWidth || 1200;
-    const maxPostX = Math.max(2, 100 - ((310 + 15) / width * 100));
-    state.posts.forEach(p => { p.x = clamp(p.x, 0, maxPostX); p.y = Math.max(0, p.y); });
-    state.stickers.forEach(s => { s.x = clamp(s.x, 0, 94); s.y = Math.max(0, s.y); });
-    saveState();
+  function updateBoardHeight() {
+    let maxBottom=690; boardItems.querySelectorAll('[data-kind]').forEach(el=>{maxBottom=Math.max(maxBottom,el.offsetTop+el.offsetHeight+42)}); boardItems.style.height=`${maxBottom}px`;
   }
 
   function switchMediaTab(tab) {
-    document.querySelectorAll('.media-tab').forEach(b => b.classList.toggle('active', b.dataset.mediaTab === tab));
-    $('uploadPane').classList.toggle('active', tab === 'upload');
-    $('urlPane').classList.toggle('active', tab === 'url');
+    if (tab === 'giphy' && !CONFIG.GIPHY_API_KEY) { showToast('Add a GIPHY API key in config.js to enable GIF search'); return; }
+    document.querySelectorAll('.media-tab').forEach(b=>b.classList.toggle('active',b.dataset.mediaTab===tab));
+    ['upload','url','giphy'].forEach(name => $(`${name}Pane`).classList.toggle('active',name===tab));
   }
 
   function handleMediaUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      showToast('That file is a bit huge — keep it under 3 MB for this browser-only POC');
-      event.target.value = '';
-      return;
+    const file=event.target.files?.[0]; if(!file)return;
+    if(file.size>MAX_UPLOAD){showToast('Keep uploads under 1.25 MB in TacoBoard 2.0');event.target.value='';return;}
+    const reader=new FileReader(); reader.onload=()=>{uploadedMediaData=String(reader.result||'');selectedGifUrl='';$('mediaUrlInput').value='';renderMediaPreview(uploadedMediaData)}; reader.readAsDataURL(file);
+  }
+
+  async function searchGiphy() {
+    const q=$('giphySearchInput').value.trim(); if(!q||!CONFIG.GIPHY_API_KEY)return;
+    setBusy($('giphySearchBtn'),true,'…'); $('giphyResults').innerHTML='';
+    try {
+      const url=new URL('https://api.giphy.com/v1/gifs/search'); url.searchParams.set('api_key',CONFIG.GIPHY_API_KEY); url.searchParams.set('q',q); url.searchParams.set('limit','12'); url.searchParams.set('rating','pg-13'); url.searchParams.set('lang','en');
+      const response=await fetch(url); if(!response.ok)throw new Error('GIPHY search failed'); const json=await response.json();
+      json.data.forEach(gif=>{const imgUrl=gif.images?.fixed_width?.url||gif.images?.downsized?.url;const preview=gif.images?.fixed_width_small?.url||imgUrl;if(!imgUrl)return;const b=document.createElement('button');b.type='button';b.className='gif-choice';const img=document.createElement('img');img.src=preview;img.alt=gif.title||'GIF';b.appendChild(img);b.addEventListener('click',()=>{selectedGifUrl=imgUrl;uploadedMediaData='';$('mediaUrlInput').value='';document.querySelectorAll('.gif-choice').forEach(x=>x.classList.toggle('selected',x===b));renderMediaPreview(imgUrl)});$('giphyResults').appendChild(b)});
+      if(!$('giphyResults').children.length)$('giphyResults').textContent='No GIF tacos found.';
+    } catch(err){console.error(err);showToast('GIPHY is being dramatic right now');} finally{setBusy($('giphySearchBtn'),false,'Search');}
+  }
+
+  function renderMediaPreview(src) { const p=$('mediaPreview');p.innerHTML='';if(!src){p.hidden=true;return}const img=document.createElement('img');img.src=src;img.alt='Media preview';img.onload=()=>{p.hidden=false};img.onerror=()=>{p.hidden=true};p.appendChild(img); }
+  function updateCharCount(){ $('charCount').textContent=String($('messageInput').value.length); }
+
+  async function mutate(action, payload) {
+    if (isRemote) {
+      const map={
+        add_post:['add_tacoboard_post',{p_slug:current.slug,p_token:current.token,p_author:payload.author,p_message:payload.message,p_media:payload.media||'',p_color:payload.color,p_x:payload.x,p_y:payload.y,p_rotation:payload.rotation}],
+        update_post:['update_tacoboard_post',{p_slug:current.slug,p_admin_token:current.token,p_post_id:payload.post_id,p_author:payload.author,p_message:payload.message,p_media:payload.media||'',p_color:payload.color}],
+        delete_post:['delete_tacoboard_post',{p_slug:current.slug,p_admin_token:current.token,p_post_id:payload.post_id}],
+        move_post:['move_tacoboard_post',{p_slug:current.slug,p_admin_token:current.token,p_post_id:payload.post_id,p_x:payload.x,p_y:payload.y}],
+        add_sticker:['add_tacoboard_sticker',{p_slug:current.slug,p_token:current.token,p_emoji:payload.emoji,p_x:payload.x,p_y:payload.y,p_rotation:payload.rotation,p_size:payload.size}],
+        delete_sticker:['delete_tacoboard_sticker',{p_slug:current.slug,p_admin_token:current.token,p_sticker_id:payload.sticker_id}],
+        move_sticker:['move_tacoboard_sticker',{p_slug:current.slug,p_admin_token:current.token,p_sticker_id:payload.sticker_id,p_x:payload.x,p_y:payload.y}],
+        update_board:['update_tacoboard',{p_slug:current.slug,p_admin_token:current.token,p_title:payload.title,p_subtitle:payload.subtitle,p_theme:payload.theme}],
+        set_status:['set_tacoboard_status',{p_slug:current.slug,p_admin_token:current.token,p_status:payload.status}]
+      };
+      const entry=map[action]; if(!entry)throw new Error(`Unknown action ${action}`); const {data,error}=await client.rpc(entry[0],entry[1]); if(error)throw error; return data;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      uploadedMediaData = String(reader.result || '');
-      $('mediaUrlInput').value = '';
-      renderMediaPreview(uploadedMediaData);
-    };
-    reader.readAsDataURL(file);
+    return localMutate(action,payload);
   }
 
-  function renderMediaPreview(src) {
-    const preview = $('mediaPreview');
-    preview.innerHTML = '';
-    if (!src) { preview.hidden = true; return; }
-    const img = document.createElement('img');
-    img.src = src;
-    img.alt = 'Media preview';
-    img.onload = () => { preview.hidden = false; };
-    img.onerror = () => { preview.hidden = true; };
-    preview.appendChild(img);
+  async function remoteCreateBoard(title, subtitle) {
+    const {data,error}=await client.rpc('create_tacoboard',{p_title:title,p_subtitle:subtitle,p_theme:'fiesta'}); if(error)throw error; return data;
+  }
+  async function remoteGetBoard() {
+    const {data,error}=await client.rpc('get_tacoboard',{p_slug:current.slug,p_token:current.token}); if(error)throw error; return data;
   }
 
-  function updateCharCount() { $('charCount').textContent = String($('messageInput').value.length); }
+  function localKey(slug){return `tacoboard:v2:${slug}`}
+  function localCreateBoard(title,subtitle){const slug=`local-${randomToken(5)}`,admin_token='local-admin',contributor_token='local';const state={board:{id:cryptoId(),slug,title,subtitle,theme:'fiesta',status:'open',created_at:new Date().toISOString()},posts:[],stickers:[{id:cryptoId(),emoji:'🌮',x:72,y:70,rotation:-10,size:1.18},{id:cryptoId(),emoji:'✨',x:83,y:76,rotation:9,size:.82}],contributor_token};localStorage.setItem(localKey(slug),JSON.stringify(state));return{slug,admin_token,contributor_token}}
+  function localGetBoard(){const raw=localStorage.getItem(localKey(current.slug));if(!raw)return null;const state=JSON.parse(raw);return{...state,is_admin:current.token==='local-admin',contributor_token:current.token==='local-admin'?state.contributor_token:null}}
+  function localMutate(action,p){const raw=localStorage.getItem(localKey(current.slug));if(!raw)throw new Error('Local board not found');const s=JSON.parse(raw),admin=current.token==='local-admin';if(s.board.status==='served'&&['add_post','add_sticker'].includes(action)&&!admin)throw new Error('This board has been served.');if(['update_post','delete_post','move_post','delete_sticker','move_sticker','update_board','set_status'].includes(action)&&!admin)throw new Error('Admin taco key required.');
+    if(action==='add_post')s.posts.push({id:cryptoId(),author:p.author,message:p.message,media:p.media||'',color:p.color,x:p.x,y:p.y,rotation:p.rotation,created_at:new Date().toISOString()});
+    if(action==='update_post'){const x=s.posts.find(v=>v.id===p.post_id);if(x)Object.assign(x,{author:p.author,message:p.message,media:p.media||'',color:p.color})}
+    if(action==='delete_post')s.posts=s.posts.filter(v=>v.id!==p.post_id);
+    if(action==='move_post'){const x=s.posts.find(v=>v.id===p.post_id);if(x)Object.assign(x,{x:p.x,y:p.y})}
+    if(action==='add_sticker')s.stickers.push({id:cryptoId(),emoji:p.emoji,x:p.x,y:p.y,rotation:p.rotation,size:p.size});
+    if(action==='delete_sticker')s.stickers=s.stickers.filter(v=>v.id!==p.sticker_id);
+    if(action==='move_sticker'){const x=s.stickers.find(v=>v.id===p.sticker_id);if(x)Object.assign(x,{x:p.x,y:p.y})}
+    if(action==='update_board')Object.assign(s.board,{title:p.title,subtitle:p.subtitle,theme:p.theme});
+    if(action==='set_status')s.board.status=p.status;
+    localStorage.setItem(localKey(current.slug),JSON.stringify(s));return true;}
+
+  function setupRealtime() {
+    teardownRealtime();
+    realtimeChannel=client.channel(`tacoboard-${current.slug}`)
+      .on('broadcast',{event:'refresh'},()=>scheduleRefresh())
+      .subscribe(status=>{if(status==='SUBSCRIBED')$('syncStatus').textContent='Shared board • live taco sync'});
+  }
+  function teardownRealtime(){if(realtimeChannel&&client){client.removeChannel(realtimeChannel)}realtimeChannel=null;clearTimeout(refreshTimer)}
+  function broadcastRefresh(){if(!realtimeChannel)return;realtimeChannel.send({type:'broadcast',event:'refresh',payload:{at:Date.now()}}).catch?.(()=>{});}
+  function scheduleRefresh(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>loadBoard(),140)}
 
   async function captureBoard() {
-    if (!window.html2canvas) throw new Error('Export library failed to load');
-    document.body.classList.add('exporting');
-    const previous = board.style.overflow;
-    board.style.overflow = 'visible';
-    try {
-      const canvas = await html2canvas(board, {
-        backgroundColor: null,
-        scale: Math.min(2, window.devicePixelRatio || 1.5),
-        useCORS: true,
-        allowTaint: false,
-        logging: false
-      });
-      return canvas;
-    } finally {
-      board.style.overflow = previous;
-      document.body.classList.remove('exporting');
-    }
+    if(!window.html2canvas)throw new Error('Export library failed to load');document.body.classList.add('exporting');const previous=boardEl.style.overflow;boardEl.style.overflow='visible';
+    try{return await html2canvas(boardEl,{backgroundColor:null,scale:Math.min(2,window.devicePixelRatio||1.5),useCORS:true,allowTaint:false,logging:false})}finally{boardEl.style.overflow=previous;document.body.classList.remove('exporting')}
   }
+  async function exportPNG(){ $('exportMenu').hidden=true;showToast('Making your keepsake…');try{const canvas=await captureBoard(),link=document.createElement('a');link.download=`${slugify(current.board.title)}.png`;link.href=canvas.toDataURL('image/png');link.click();showToast('PNG saved 🌮')}catch(err){console.error(err);showToast('Export tripped over a remote image. Uploading the image directly is most reliable.')}}
+  async function exportPDF(){ $('exportMenu').hidden=true;showToast('Pressing tortillas into PDF…');try{const canvas=await captureBoard(),{jsPDF}=window.jspdf||{};if(!jsPDF)throw new Error('PDF library failed');const orientation=canvas.width>=canvas.height?'landscape':'portrait',pdf=new jsPDF({orientation,unit:'pt',format:'a4'}),pageW=pdf.internal.pageSize.getWidth(),pageH=pdf.internal.pageSize.getHeight(),ratio=Math.min(pageW/canvas.width,pageH/canvas.height),w=canvas.width*ratio,h=canvas.height*ratio;pdf.addImage(canvas.toDataURL('image/jpeg',.94),'JPEG',(pageW-w)/2,(pageH-h)/2,w,h,undefined,'FAST');pdf.save(`${slugify(current.board.title)}.pdf`);showToast('PDF saved 🌮')}catch(err){console.error(err);showToast('PDF export tripped over a remote image.')}}
+  function exportJSON(){ $('exportMenu').hidden=true;const data={board:current.board,posts:current.posts,stickers:current.stickers};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`${slugify(current.board.title)}-data.json`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);showToast('Board data exported')}
 
-  async function exportPNG() {
-    $('exportMenu').hidden = true;
-    showToast('Making your keepsake…');
-    try {
-      const canvas = await captureBoard();
-      const link = document.createElement('a');
-      link.download = `${slugify(state.title)}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-      showToast('PNG saved 🌮');
-    } catch (err) {
-      console.error(err);
-      showToast('Could not export. Try uploaded media instead of a remote GIF URL.');
-    }
-  }
-
-  async function exportPDF() {
-    $('exportMenu').hidden = true;
-    showToast('Pressing tortillas into PDF…');
-    try {
-      const canvas = await captureBoard();
-      const { jsPDF } = window.jspdf || {};
-      if (!jsPDF) throw new Error('PDF library failed to load');
-      const orientation = canvas.width >= canvas.height ? 'landscape' : 'portrait';
-      const pdf = new jsPDF({ orientation, unit: 'pt', format: 'a4' });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const ratio = Math.min(pageW / canvas.width, pageH / canvas.height);
-      const w = canvas.width * ratio;
-      const h = canvas.height * ratio;
-      const x = (pageW - w) / 2;
-      const y = (pageH - h) / 2;
-      pdf.addImage(canvas.toDataURL('image/jpeg', .94), 'JPEG', x, y, w, h, undefined, 'FAST');
-      pdf.save(`${slugify(state.title)}.pdf`);
-      showToast('PDF saved 🌮');
-    } catch (err) {
-      console.error(err);
-      showToast('Could not export. Try uploaded media instead of a remote GIF URL.');
-    }
-  }
-
-  function exportJSON() {
-    $('exportMenu').hidden = true;
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${slugify(state.title)}-data.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    showToast('Board data exported');
-  }
-
-  async function importJSON(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const next = JSON.parse(await file.text());
-      if (!next || !Array.isArray(next.posts) || !Array.isArray(next.stickers)) throw new Error('Invalid TacoBoard data');
-      state = {
-        title: String(next.title || seed.title),
-        subtitle: String(next.subtitle || seed.subtitle),
-        theme: THEMES.includes(next.theme) ? next.theme : 'fiesta',
-        posts: next.posts,
-        stickers: next.stickers
-      };
-      saveState();
-      render();
-      showToast('Board imported');
-    } catch (err) {
-      console.error(err);
-      showToast('That does not look like TacoBoard data');
-    } finally {
-      event.target.value = '';
-    }
-  }
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return structuredCloneSafe(seed);
-      const parsed = JSON.parse(raw);
-      return {
-        title: parsed.title || seed.title,
-        subtitle: parsed.subtitle || seed.subtitle,
-        theme: THEMES.includes(parsed.theme) ? parsed.theme : seed.theme,
-        posts: Array.isArray(parsed.posts) ? parsed.posts : [],
-        stickers: Array.isArray(parsed.stickers) ? parsed.stickers : structuredCloneSafe(seed.stickers)
-      };
-    } catch {
-      return structuredCloneSafe(seed);
-    }
-  }
-
-  function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (err) {
-      console.error(err);
-      showToast('Browser storage is full — export the board data before adding more media.');
-    }
-  }
-
-  function showToast(message) {
-    const toast = $('toast');
-    toast.textContent = message;
-    toast.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
-  }
-
-  function getInitial(name) { return (name.trim()[0] || '🌮').toUpperCase(); }
-  function randomBetween(min, max) { return min + Math.random() * (max - min); }
-  function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
-  function cryptoId() { return (globalThis.crypto?.randomUUID?.() || `taco-${Date.now()}-${Math.random().toString(16).slice(2)}`); }
-  function slugify(text) { return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'tacoboard'; }
-  function structuredCloneSafe(value) { return globalThis.structuredClone ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
-  function rgbToHex(rgb) {
-    if (!rgb) return '';
-    if (rgb.startsWith('#')) return rgb.toLowerCase();
-    const nums = rgb.match(/\d+/g)?.slice(0,3).map(Number);
-    return nums?.length === 3 ? `#${nums.map(n => n.toString(16).padStart(2,'0')).join('')}` : rgb;
-  }
+  function rainTacos(){const rain=$('tacoRain');for(let i=0;i<16;i++){const t=document.createElement('span');t.className='falling-taco';t.textContent=i%5===0?'🌶️':'🌮';t.style.left=`${Math.random()*100}%`;t.style.animationDelay=`${Math.random()*.35}s`;t.style.fontSize=`${1.5+Math.random()*2}rem`;rain.appendChild(t);setTimeout(()=>t.remove(),2100)}}
+  function showToast(message){const t=$('toast');t.textContent=message;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2600)}
+  function showFatal(title,message){$('errorTitle').textContent=title;$('errorMessage').textContent=message;$('errorDialog').showModal();showHome()}
+  function handleError(err,title){console.error(err);$('errorTitle').textContent=title;$('errorMessage').textContent=friendlyError(err);$('errorDialog').showModal()}
+  function friendlyError(err){const m=String(err?.message||err||'Unknown taco failure');if(/function .* does not exist|schema cache/i.test(m))return 'Supabase is connected, but TacoBoard setup.sql has not been run yet (or the schema cache needs a moment). Run setup.sql in the Supabase SQL editor and reload.';if(/invalid taco|not found/i.test(m))return 'This board link is invalid, expired, or missing its secret taco key.';return m}
+  function setBusy(btn,busy,label){btn.disabled=busy;btn.textContent=label}
+  function buildBoardUrl({slug,key,admin}){const url=new URL(location.href);url.search='';url.hash='';url.searchParams.set('board',slug);if(admin)url.searchParams.set('admin',admin);else if(key)url.searchParams.set('key',key);return url.toString()}
+  function getInitial(name){return(name?.trim()?.[0]||'🌮').toUpperCase()} function randomBetween(min,max){return min+Math.random()*(max-min)} function clamp(v,min,max){return Math.min(max,Math.max(min,v))}
+  function cryptoId(){return globalThis.crypto?.randomUUID?.()||`taco-${Date.now()}-${Math.random().toString(16).slice(2)}`}
+  function randomToken(bytes=12){const arr=new Uint8Array(bytes);crypto.getRandomValues(arr);return Array.from(arr,b=>b.toString(16).padStart(2,'0')).join('')}
+  function slugify(text){return text.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'tacoboard'}
+  function rgbToHex(rgb){if(!rgb)return'';if(rgb.startsWith('#'))return rgb.toLowerCase();const nums=rgb.match(/\d+/g)?.slice(0,3).map(Number);return nums?.length===3?`#${nums.map(n=>n.toString(16).padStart(2,'0')).join('')}`:rgb}
 })();
