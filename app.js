@@ -489,7 +489,38 @@
     try{return await html2canvas(boardEl,{backgroundColor:null,scale:Math.min(2,window.devicePixelRatio||1.5),useCORS:true,allowTaint:false,logging:false})}finally{boardEl.style.overflow=previous;document.body.classList.remove('exporting')}
   }
   async function exportPNG(){ $('exportMenu').hidden=true;showToast('Making your keepsake…');try{const canvas=await captureBoard(),link=document.createElement('a');link.download=`${slugify(current.board.title)}.png`;link.href=canvas.toDataURL('image/png');link.click();showToast('PNG saved 🌮')}catch(err){console.error(err);showToast('Export tripped over a remote image. Uploading the image directly is most reliable.')}}
-  async function exportPDF(){ $('exportMenu').hidden=true;showToast('Pressing tortillas into PDF…');try{const canvas=await captureBoard(),{jsPDF}=window.jspdf||{};if(!jsPDF)throw new Error('PDF library failed');const orientation=canvas.width>=canvas.height?'landscape':'portrait',pdf=new jsPDF({orientation,unit:'pt',format:'a4'}),pageW=pdf.internal.pageSize.getWidth(),pageH=pdf.internal.pageSize.getHeight(),ratio=Math.min(pageW/canvas.width,pageH/canvas.height),w=canvas.width*ratio,h=canvas.height*ratio;pdf.addImage(canvas.toDataURL('image/jpeg',.94),'JPEG',(pageW-w)/2,(pageH-h)/2,w,h,undefined,'FAST');pdf.save(`${slugify(current.board.title)}.pdf`);showToast('PDF saved 🌮')}catch(err){console.error(err);showToast('PDF export tripped over a remote image.')}}
+  function drawPdfConfetti(pdf,pageW,pageH){
+    const dots=[
+      [34,30,238,113,76,5],[54,52,51,122,92,3],[pageW-38,32,238,113,76,4],[pageW-62,55,51,122,92,3],
+      [28,pageH-28,238,113,76,3],[52,pageH-42,51,122,92,4],[pageW-30,pageH-30,238,113,76,5],[pageW-58,pageH-46,51,122,92,3]
+    ];
+    dots.forEach(([x,y,r,g,b,size])=>{pdf.setFillColor(r,g,b);pdf.circle(x,y,size,'F')});
+    pdf.setDrawColor(241,183,72);pdf.setLineWidth(2);
+    pdf.line(72,34,88,42);pdf.line(pageW-92,43,pageW-76,35);pdf.line(76,pageH-34,90,pageH-42);pdf.line(pageW-90,pageH-42,pageW-74,pageH-34);
+  }
+  function drawPdfTacoMark(pdf,x,y,scale=1){
+    pdf.setFillColor(245,190,72);pdf.roundedRect(x,y,34*scale,18*scale,8*scale,8*scale,'F');
+    pdf.setFillColor(80,154,80);pdf.circle(x+9*scale,y+5*scale,3.2*scale,'F');pdf.circle(x+24*scale,y+5*scale,3*scale,'F');
+    pdf.setFillColor(214,72,61);pdf.circle(x+16*scale,y+4*scale,2.6*scale,'F');
+    pdf.setFillColor(255,224,91);pdf.circle(x+29*scale,y+7*scale,2.3*scale,'F');
+  }
+  async function exportPDF(){
+    $('exportMenu').hidden=true;showToast('Pressing tortillas into PDF…');
+    try{
+      const canvas=await captureBoard(),{jsPDF}=window.jspdf||{};if(!jsPDF)throw new Error('PDF library failed');
+      const orientation=canvas.width>=canvas.height?'landscape':'portrait',pdf=new jsPDF({orientation,unit:'pt',format:'a4'}),pageW=pdf.internal.pageSize.getWidth(),pageH=pdf.internal.pageSize.getHeight();
+      const side=30,headerH=92,footerH=48,availableW=pageW-side*2,availableH=pageH-headerH-footerH,ratio=Math.min(availableW/canvas.width,availableH/canvas.height),w=canvas.width*ratio,h=canvas.height*ratio,x=(pageW-w)/2,y=headerH+(availableH-h)/2;
+      pdf.setFillColor(255,249,232);pdf.rect(0,0,pageW,pageH,'F');drawPdfConfetti(pdf,pageW,pageH);drawPdfTacoMark(pdf,side,24,.9);
+      pdf.setTextColor(91,48,26);pdf.setFont('helvetica','bold');pdf.setFontSize(10);pdf.text('TACOBOARD',side+40,36);
+      pdf.setFontSize(19);pdf.text(String(current.board.title||'TacoBoard'),side,58,{maxWidth:pageW-side*2});
+      if(current.board.subtitle){pdf.setFont('helvetica','normal');pdf.setFontSize(9.5);pdf.setTextColor(118,83,61);const subtitle=pdf.splitTextToSize(String(current.board.subtitle),pageW-side*2);pdf.text(subtitle,side,73)}
+      pdf.setFillColor(230,213,177);pdf.roundedRect(x+3,y+4,w,h,7,7,'F');pdf.setFillColor(255,255,255);pdf.roundedRect(x-2,y-2,w+4,h+4,7,7,'F');pdf.addImage(canvas.toDataURL('image/jpeg',.94),'JPEG',x,y,w,h,undefined,'FAST');
+      pdf.setDrawColor(224,194,128);pdf.setLineWidth(.8);pdf.line(side,pageH-footerH+9,pageW-side,pageH-footerH+9);
+      pdf.setFont('helvetica','bold');pdf.setFontSize(9);pdf.setTextColor(91,48,26);const count=current.posts.length;pdf.text(`SERVED WITH ${count} TACO NOTE${count===1?'':'S'}`,side,pageH-20);
+      pdf.setFont('helvetica','normal');pdf.setTextColor(132,99,75);pdf.text('Made with TacoBoard • compliments taste better in a tortilla',pageW-side,pageH-20,{align:'right'});
+      pdf.save(`${slugify(current.board.title)}.pdf`);showToast('PDF saved 🌮')
+    }catch(err){console.error(err);showToast('PDF export tripped over a remote image.')}
+  }
   function exportJSON(){ $('exportMenu').hidden=true;const data={board:current.board,posts:current.posts,stickers:current.stickers};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`${slugify(current.board.title)}-data.json`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);showToast('Board data exported')}
 
   function rainTacos(){const rain=$('tacoRain');for(let i=0;i<16;i++){const t=document.createElement('span');t.className='falling-taco';t.textContent=i%5===0?'🌶️':'🌮';t.style.left=`${Math.random()*100}%`;t.style.animationDelay=`${Math.random()*.35}s`;t.style.fontSize=`${1.5+Math.random()*2}rem`;rain.appendChild(t);setTimeout(()=>t.remove(),2100)}}
